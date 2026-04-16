@@ -1,0 +1,8 @@
+{
+  "name": "secgate",
+  "version": "1.0.0",
+  "bin": {
+    "secgate": "index.js"
+  },
+  "type": "module"
+}
