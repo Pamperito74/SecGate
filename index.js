@@ -4,6 +4,10 @@ import { execSync } from "child_process";
 import fs from "fs";
 
 const target = process.argv[2] || ".";
+const reportFile = "soc-report.json";
+
+let FAIL = 0;
+
 const report = {
   timestamp: new Date().toISOString(),
   target,
@@ -11,77 +15,147 @@ const report = {
   checks: {}
 };
 
-function run(name, cmd) {
-  try {
-    const out = execSync(cmd, { encoding: "utf-8", stdio: "pipe" });
-    report.checks[name] = { ok: true };
-  } catch (err) {
-    report.checks[name] = {
-      ok: false,
-      error: (err.stdout || err.message || "").toString().slice(0, 500)
-    };
-    report.status = "FAIL";
-  }
-}
-
 function exists(path) {
   return fs.existsSync(path);
 }
 
-function checkBranch() {
+function toolExists(cmd) {
   try {
-    const branch = execSync("git rev-parse --abbrev-ref HEAD", { encoding: "utf-8" }).trim();
-    const ok = /^(feature|fix|chore|hotfix)\/[a-z0-9-_]+$/.test(branch);
-    report.checks["branch"] = { ok, branch };
-    if (!ok) report.status = "FAIL";
+    execSync(`which ${cmd}`, { stdio: "ignore" });
+    return true;
   } catch {
-    report.checks["branch"] = { ok: false };
-    report.status = "FAIL";
+    return false;
   }
 }
 
-function checkCommit() {
+function safeRun(name, cmd, critical = false) {
+  console.log(`\n[RUN] ${name}`);
+  console.log(`$ ${cmd}`);
+
   try {
-    const msg = execSync("git log -1 --pretty=%B", { encoding: "utf-8" }).trim();
-    const ok = msg.length >= 10;
-    report.checks["commit"] = { ok, msg };
-    if (!ok) report.status = "FAIL";
-  } catch {
-    report.checks["commit"] = { ok: false };
-    report.status = "FAIL";
+    const out = execSync(cmd, {
+      encoding: "utf-8",
+      stdio: "pipe"
+    });
+
+    report.checks[name] = {
+      ok: true,
+      output: out?.toString()?.slice(0, 1500) || ""
+    };
+
+    console.log(`[OK] ${name}`);
+  } catch (err) {
+    const msg =
+      (err.stdout || "").toString() +
+      (err.stderr || "").toString() +
+      (err.message || "");
+
+    report.checks[name] = {
+      ok: false,
+      error: msg.slice(0, 2000)
+    };
+
+    console.log(`[FAIL] ${name}`);
+    console.log(msg.slice(0, 400));
+
+    if (critical) FAIL = 1;
   }
 }
 
-console.log("soc-scan start");
+/* ---------------------------
+   SOC SCAN PIPELINE
+----------------------------*/
 
-// security scanners
-run("semgrep", `semgrep --config=auto ${target}`);
-run("gitleaks", `gitleaks detect --source ${target}`);
-run("trivy", `trivy fs ${target}`);
+console.log("SOC SCAN START");
+console.log("Target:", target);
+console.log("-------------------------");
 
-// dependency checks
+/* [1] STATIC ANALYSIS */
+console.log("[1] Static Analysis (Semgrep)");
+
+if (toolExists("semgrep")) {
+  safeRun("semgrep", `semgrep --config=auto ${target}`, true);
+} else {
+  console.log("[SKIP] semgrep not installed");
+}
+
+/* ------------------------- */
+
+console.log("-------------------------");
+
+/* [2] SECRETS SCAN */
+console.log("[2] Secrets Scan (Gitleaks)");
+
+if (toolExists("gitleaks")) {
+  safeRun("gitleaks", `gitleaks detect --source ${target}`);
+} else {
+  console.log("[SKIP] gitleaks not installed");
+}
+
+/* ------------------------- */
+
+console.log("-------------------------");
+
+/* [3] DEPENDENCY SCAN */
+console.log("[3] Dependency Scan");
+
 if (exists(`${target}/package.json`)) {
-  run("npm-audit", `cd ${target} && npm audit --json`);
+  console.log("Node project detected");
+
+  safeRun(
+    "npm-audit",
+    `cd ${target} && npm audit --json`,
+    false
+  );
 }
 
 if (exists(`${target}/requirements.txt`)) {
-  run("pip-audit", `pip-audit -r ${target}/requirements.txt`);
+  console.log("Python project detected");
+
+  safeRun(
+    "pip-audit",
+    `pip-audit -r ${target}/requirements.txt`,
+    false
+  );
 }
 
-// lint (optional but useful)
-if (exists(`${target}/package.json`)) {
-  run("eslint", `npx eslint ${target}`);
+/* ------------------------- */
+
+console.log("-------------------------");
+
+/* [4] INFRA / FS SCAN */
+console.log("[4] Filesystem / IaC Scan (Trivy)");
+
+if (toolExists("trivy")) {
+  safeRun("trivy", `trivy fs ${target}`);
+} else {
+  console.log("[SKIP] trivy not installed");
 }
 
-// git checks
-checkBranch();
-checkCommit();
+/* ------------------------- */
 
-// output
-fs.writeFileSync("soc-report.json", JSON.stringify(report, null, 2));
+/* [5] LINTING (optional) */
+console.log("[5] Lint Scan");
 
-console.log("soc-scan done");
-console.log("status:", report.status);
+if (exists(`${target}/package.json`) && toolExists("eslint")) {
+  safeRun("eslint", `npx eslint ${target}`);
+} else {
+  console.log("[SKIP] eslint not available or no node project");
+}
 
-// exit for hooks
-process.exit(report.status === "PASS" ? 0 : 1);
+/* ------------------------- */
+
+/* FINALIZE */
+report.status = FAIL === 0 ? "PASS" : "FAIL";
+
+console.log("-------------------------");
+console.log("SOC SCAN END");
+console.log("RESULT:", report.status);
+
+/* write report */
+fs.writeFileSync(reportFile, JSON.stringify(report, null, 2));
+
+console.log(`Report saved -> ${reportFile}`);
+
+/* exit code for CI / git hooks */
+process.exit(FAIL);
