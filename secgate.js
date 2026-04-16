@@ -4,8 +4,7 @@ import { execSync } from "child_process";
 import fs from "fs";
 
 const target = process.argv[2] || ".";
-const mode = process.argv.includes("--auto") ? "auto" : "report";
-
+const DEBUG = process.argv.includes("--debug");
 const outputFile = "secgate-v4-report.json";
 
 /* -----------------------------
@@ -15,10 +14,10 @@ const outputFile = "secgate-v4-report.json";
 const findings = [];
 
 const report = {
-  version: "4.0",
+  version: "4.1-stable",
   timestamp: new Date().toISOString(),
   target,
-  mode,
+  mode: DEBUG ? "debug" : "report",
   status: "PASS",
   summary: { critical: 0, high: 0, medium: 0, low: 0 },
   findings: [],
@@ -47,12 +46,19 @@ function run(cmd) {
   try {
     return execSync(cmd, { encoding: "utf-8", stdio: "pipe" });
   } catch (e) {
-    return (e.stdout || "") + (e.stderr || "");
+    return ((e.stdout || "") + (e.stderr || "")).toString();
+  }
+}
+
+function logDebug(title, data) {
+  if (DEBUG) {
+    console.log(`\n[DEBUG] ${title}`);
+    console.log(data.slice(0, 1500));
   }
 }
 
 /* -----------------------------
-   FINDING MODEL
+   FINDINGS MODEL
 ------------------------------*/
 
 function addFinding(f) {
@@ -67,47 +73,108 @@ function addFinding(f) {
 }
 
 /* -----------------------------
-   SCANNERS
+   SEMGREP (FIXED PARSING)
 ------------------------------*/
 
-function semgrep() {
+function semgrepScan() {
   if (!toolExists("semgrep")) return;
 
   const out = run(`semgrep --config=auto ${target}`);
+  logDebug("semgrep raw output", out);
 
-  if (out.includes("HIGH") || out.includes("ERROR")) {
+  const lower = out.toLowerCase();
+
+  const hasSignal =
+    lower.includes("error") ||
+    lower.includes("warning") ||
+    lower.includes("rule") ||
+    lower.includes("finding") ||
+    lower.includes("severity");
+
+  if (hasSignal) {
     addFinding({
       tool: "semgrep",
       type: "code",
-      severity: "HIGH",
-      signature: "pattern-match",
-      message: out.slice(0, 1200),
+      severity: lower.includes("error") ? "HIGH" : "MEDIUM",
+      signature: "static-analysis",
+      message: out.slice(0, 1500),
       fixable: true
     });
   }
 }
 
-function gitleaks() {
+/* -----------------------------
+   GITLEAKS (FIXED PARSING)
+------------------------------*/
+
+function gitleaksScan() {
   if (!toolExists("gitleaks")) return;
 
   const out = run(`gitleaks detect --source ${target}`);
+  logDebug("gitleaks raw output", out);
 
-if (out.toLowerCase().includes("leak") || out.toLowerCase().includes("secret")) {
+  const lower = out.toLowerCase();
+
+  const hasLeakSignal =
+    lower.includes("leak") ||
+    lower.includes("secret") ||
+    lower.includes("finding") ||
+    lower.includes("detected");
+
+  if (hasLeakSignal) {
     addFinding({
       tool: "gitleaks",
       type: "secret",
       severity: "CRITICAL",
       signature: "secret-exposure",
-      message: out.slice(0, 1200),
+      message: out.slice(0, 1500),
       fixable: false
     });
   }
 }
 
+/* -----------------------------
+   TRIVY
+------------------------------*/
+
+function trivyScan() {
+  if (!toolExists("trivy")) return;
+
+  const out = run(`trivy fs ${target}`);
+  logDebug("trivy raw output", out);
+
+  const lower = out.toLowerCase();
+
+  if (lower.includes("critical")) {
+    addFinding({
+      tool: "trivy",
+      type: "dependency",
+      severity: "CRITICAL",
+      signature: "infra-critical",
+      message: out.slice(0, 1500),
+      fixable: false
+    });
+  } else if (lower.includes("high")) {
+    addFinding({
+      tool: "trivy",
+      type: "dependency",
+      severity: "HIGH",
+      signature: "infra-high",
+      message: out.slice(0, 1500),
+      fixable: false
+    });
+  }
+}
+
+/* -----------------------------
+   NPM AUDIT (SAFE)
+------------------------------*/
+
 function npmAudit() {
   if (!fs.existsSync(`${target}/package.json`)) return;
 
   const out = run(`cd ${target} && npm audit --json`);
+  logDebug("npm audit raw", out);
 
   try {
     const json = JSON.parse(out);
@@ -124,22 +191,26 @@ function npmAudit() {
             ? "CRITICAL"
             : v.severity === "high"
             ? "HIGH"
-            : "MEDIUM",
+            : v.severity === "moderate"
+            ? "MEDIUM"
+            : "LOW",
         signature: k,
         message: k,
         fixable: true
       });
     }
-  } catch {}
+  } catch {
+    if (out.toLowerCase().includes("eno lock")) {
+      if (DEBUG) console.log("[SKIP] npm lockfile missing");
+    }
+  }
 }
 
 /* -----------------------------
-   INTELLIGENCE ENGINE
+   INTELLIGENCE ENGINE (v4 CORE)
 ------------------------------*/
 
 function analyze(findings) {
-  let risk = 0;
-
   const weights = {
     CRITICAL: 10,
     HIGH: 5,
@@ -147,20 +218,20 @@ function analyze(findings) {
     LOW: 1
   };
 
+  let score = 0;
   const attackSurface = new Set();
   const recommendations = [];
 
   for (const f of findings) {
-    risk += weights[f.severity] || 0;
-
+    score += weights[f.severity] || 0;
     attackSurface.add(f.type);
 
     if (f.severity === "CRITICAL") {
-      recommendations.push(`Immediate fix required: ${f.tool}`);
+      recommendations.push(`Immediate action required: ${f.tool}`);
     }
 
     if (f.type === "secret") {
-      recommendations.push("Rotate exposed secrets immediately");
+      recommendations.push("Rotate exposed credentials immediately");
     }
 
     if (f.type === "dependency") {
@@ -169,69 +240,47 @@ function analyze(findings) {
   }
 
   return {
-    riskScore: risk,
+    riskScore: score,
     attackSurface: [...attackSurface],
     recommendations: [...new Set(recommendations)]
   };
 }
 
 /* -----------------------------
-   FIX ENGINE (v4 CORE FEATURE)
-------------------------------*/
-
-function generateFix(f) {
-  if (f.tool === "npm") {
-    return `Run: npm audit fix`;
-  }
-
-  if (f.tool === "gitleaks") {
-    return `Remove secret + rotate credentials immediately`;
-  }
-
-  if (f.tool === "semgrep") {
-    return `Review vulnerable code pattern and apply secure alternative`;
-  }
-
-  return `Manual review required`;
-}
-
-/* -----------------------------
-   AUTONOMOUS ACTION ENGINE
+   ACTION ENGINE
 ------------------------------*/
 
 function buildActions(findings) {
-  const actions = [];
-
-  for (const f of findings) {
-    if (!f.fixable) continue;
-
-    actions.push({
-      type: "fix-suggestion",
-      severity: f.severity,
+  return findings
+    .filter(f => f.fixable)
+    .map(f => ({
       tool: f.tool,
-      command: generateFix(f),
-      autoExecutable: f.severity !== "CRITICAL"
-    });
-  }
-
-  return actions;
+      severity: f.severity,
+      command:
+        f.tool === "npm"
+          ? "npm audit fix"
+          : f.tool === "semgrep"
+          ? "review code pattern"
+          : "manual remediation required"
+    }));
 }
 
 /* -----------------------------
    PIPELINE
 ------------------------------*/
 
-console.log("\nSEC GATE v4 AUTONOMOUS ENGINE");
-console.log("Mode:", mode);
+console.log("\nSEC GATE v4.1 AUTONOMOUS ENGINE");
 console.log("Target:", target);
+console.log("Debug:", DEBUG);
 console.log("--------------------------------");
 
-semgrep();
-gitleaks();
+semgrepScan();
+gitleaksScan();
+trivyScan();
 npmAudit();
 
 /* -----------------------------
-   PROCESS
+   PROCESS RESULTS
 ------------------------------*/
 
 report.findings = findings;
@@ -241,46 +290,34 @@ for (const f of findings) {
   report.summary[f.severity.toLowerCase()]++;
 }
 
-/* intelligence */
 report.intelligence = analyze(findings);
-
-/* actions */
 report.actions = buildActions(findings);
 
 /* -----------------------------
-   DECISION ENGINE (AUTONOMY)
+   FINAL DECISION
 ------------------------------*/
 
 const hasCritical = findings.some(f => f.severity === "CRITICAL");
+const hasHigh = findings.some(f => f.severity === "HIGH");
 
-if (mode === "auto") {
-  console.log("\n[AUTONOMOUS MODE ENABLED]");
-
-  if (hasCritical) {
-    console.log("BLOCKING AUTO-FIX (critical risk detected)");
-  } else {
-    for (const a of report.actions) {
-      console.log(`[AUTO] ${a.command}`);
-    }
-  }
-}
+report.status = hasCritical || hasHigh ? "FAIL" : "PASS";
 
 /* -----------------------------
-   FINAL STATUS
+   OUTPUT
 ------------------------------*/
-
-report.status = hasCritical ? "FAIL" : "PASS";
 
 console.log("\n--------------------------------");
 console.log("SEC GATE v4 COMPLETE");
 console.log("STATUS:", report.status);
 
+console.log("\nSUMMARY:", report.summary);
 console.log("RISK SCORE:", report.intelligence.riskScore);
 
-console.log("\nTOP ACTIONS:");
-report.actions.slice(0, 5).forEach(a => {
-  console.log("-", a.command);
-});
+console.log("\nRECOMMENDATIONS:");
+report.intelligence.recommendations.forEach(r => console.log("-", r));
+
+console.log("\nACTIONS:");
+report.actions.forEach(a => console.log("-", a.command));
 
 fs.writeFileSync(outputFile, JSON.stringify(report, null, 2));
 
