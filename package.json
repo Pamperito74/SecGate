@@ -43,7 +43,7 @@
   "bugs": {
     "url": "https://github.com/Stelnyx/SecGate/issues"
   },
-  "homepage": "https://github.com/Stelnyx/SecGate#readme",
+  "homepage": "https://stelnyx.github.io/SecGate/",
   "publishConfig": {
     "access": "public",
     "provenance": true
