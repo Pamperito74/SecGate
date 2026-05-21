@@ -1,0 +1,336 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>SecGate — A single-command security gate for CI/CD</title>
+<meta name="description" content="SecGate orchestrates Semgrep, Gitleaks, osv-scanner, Trivy and npm audit behind one command. It normalizes their output into one report and fails the pipeline on CRITICAL or HIGH findings. No account, no telemetry. MIT.">
+<meta name="theme-color" content="#0a0a0a">
+<meta property="og:type" content="website">
+<meta property="og:title" content="SecGate — A single-command security gate for CI/CD">
+<meta property="og:description" content="Five industry-standard scanners. One command. One report. One exit code. 98% scanner noise demoted. No account, no telemetry, MIT.">
+<meta property="og:url" content="https://stelnyx.github.io/SecGate/">
+<meta name="twitter:card" content="summary">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Cpath fill='%2300cc66' d='M50 2C54 38 62 46 98 50C62 54 54 62 50 98C46 62 38 54 2 50C38 46 46 38 50 2Z'/%3E%3C/svg%3E">
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#0a0a0a;
+  --surface:#141414;
+  --surface-2:#1a1a1a;
+  --border:#1f1f1f;
+  --border-bright:#2a2a2a;
+  --text:#e5e5e7;
+  --muted:#9a9aa0;
+  --faint:#6e6e73;
+  --green:#00cc66;
+  --green-bright:#00e676;
+  --amber:#ff9500;
+  --red:#ff3b30;
+  --pink:#ff2d78;
+  --max-w:880px;
+  --radius:8px;
+  --font:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+  --mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+}
+html,body{background:var(--bg);color:var(--text);font-family:var(--font);line-height:1.6;font-size:16px;-webkit-font-smoothing:antialiased}
+a{color:var(--green-bright);text-decoration:none}
+a:hover{text-decoration:underline}
+code,.mono{font-family:var(--mono);font-size:.92em}
+main{max-width:var(--max-w);margin:0 auto;padding:8px 24px 96px}
+
+.skip{position:absolute;left:-999px}
+.skip:focus{left:16px;top:16px;background:var(--green);color:#04140b;padding:8px 14px;border-radius:6px;z-index:10}
+
+header{border-bottom:1px solid var(--border);background:linear-gradient(180deg,#0d1410 0%,var(--bg) 70%);padding:72px 24px 64px}
+header .inner{max-width:var(--max-w);margin:0 auto}
+.brand{display:flex;align-items:center;gap:10px;font-size:12px;color:var(--muted);margin-bottom:36px;letter-spacing:.16em;text-transform:uppercase;font-weight:600}
+.brand svg{width:22px;height:22px;flex-shrink:0}
+.brand .sep{color:var(--faint)}
+.brand .self{color:var(--green)}
+h1{font-size:46px;line-height:1.1;font-weight:700;letter-spacing:-.025em;margin-bottom:20px}
+h1 .accent{color:var(--green)}
+.lede{font-size:19px;color:var(--text);max-width:660px;margin-bottom:14px}
+.sub{font-size:15px;color:var(--muted);max-width:660px;margin-bottom:32px}
+.sub code{color:var(--text)}
+
+.install{display:flex;align-items:center;gap:0;background:var(--surface);border:1px solid var(--border-bright);border-radius:var(--radius);max-width:420px;overflow:hidden;margin-bottom:24px}
+.install .cmd{flex:1;padding:14px 16px;font-family:var(--mono);font-size:14px;color:var(--text);white-space:nowrap;overflow:auto}
+.install .cmd .prompt{color:var(--green);user-select:none}
+.install button{background:var(--surface-2);border:none;border-left:1px solid var(--border);color:var(--muted);font-size:12px;font-weight:600;padding:14px 16px;cursor:pointer;font-family:var(--font);letter-spacing:.04em}
+.install button:hover{color:var(--text);background:var(--border)}
+.install button.copied{color:var(--green)}
+
+.cta-row{display:flex;gap:12px;flex-wrap:wrap;align-items:center}
+.btn{display:inline-flex;align-items:center;gap:8px;padding:12px 22px;border-radius:8px;font-weight:600;font-size:15px;border:1px solid transparent;cursor:pointer;transition:transform .12s,box-shadow .12s,background .12s}
+.btn-primary{background:var(--green);color:#04140b;box-shadow:0 0 24px rgba(0,204,102,.25)}
+.btn-primary:hover{transform:translateY(-1px);box-shadow:0 0 32px rgba(0,204,102,.4);text-decoration:none}
+.btn-secondary{background:transparent;color:var(--text);border-color:var(--border-bright)}
+.btn-secondary:hover{background:var(--surface);text-decoration:none}
+
+.badges{display:flex;gap:8px;flex-wrap:wrap;margin-top:28px}
+.badges img{height:20px}
+.proof{font-size:13px;color:var(--muted);margin-top:24px;padding-top:20px;border-top:1px solid var(--border)}
+.proof strong{color:var(--text);font-weight:600}
+
+section{margin-top:64px}
+section h2{font-size:24px;font-weight:700;letter-spacing:-.015em;margin-bottom:8px}
+section .h2-note{font-size:14px;color:var(--faint);margin-bottom:24px}
+section>p{color:var(--muted);margin-bottom:16px;max-width:680px}
+section>p strong{color:var(--text);font-weight:600}
+
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:14px;margin-top:8px}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:20px 22px}
+.card .num{font-family:var(--mono);font-size:12px;color:var(--green);font-weight:700;letter-spacing:.08em;margin-bottom:10px}
+.card h3{font-size:15px;font-weight:600;color:var(--text);margin-bottom:6px}
+.card p{font-size:14px;color:var(--muted);margin:0}
+
+/* noise stat */
+.noise{display:flex;align-items:stretch;gap:0;background:var(--surface);border:1px solid var(--border);border-radius:10px;overflow:hidden;margin-top:8px}
+.noise .col{flex:1;padding:24px;text-align:center}
+.noise .col+.col{border-left:1px solid var(--border)}
+.noise .big{font-size:40px;font-weight:700;letter-spacing:-.03em;line-height:1}
+.noise .big.in{color:var(--muted)}
+.noise .big.out{color:var(--green)}
+.noise .big.pct{color:var(--text)}
+.noise .lbl{font-size:12px;color:var(--faint);margin-top:8px;letter-spacing:.04em}
+@media (max-width:600px){.noise{flex-direction:column}.noise .col+.col{border-left:none;border-top:1px solid var(--border)}}
+
+.score{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:24px}
+.score .head{display:flex;align-items:baseline;gap:12px;margin-bottom:18px;flex-wrap:wrap}
+.score .head .n{font-size:38px;font-weight:700;letter-spacing:-.03em;color:var(--amber)}
+.score .head .d{font-size:14px;color:var(--muted)}
+.score .head .band{margin-left:auto;font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;background:rgba(255,149,0,.12);color:var(--amber);padding:4px 10px;border-radius:4px}
+.bar-row{display:grid;grid-template-columns:130px 44px 1fr;align-items:center;gap:12px;padding:9px 0}
+.bar-row+.bar-row{border-top:1px solid var(--border)}
+.bar-row .name{font-size:13px;color:var(--text)}
+.bar-row .val{font-size:13px;color:var(--text);font-weight:600;font-family:var(--mono);text-align:right}
+.bar-row .track{height:7px;background:var(--border-bright);border-radius:4px;overflow:hidden}
+.bar-row .fill{height:100%;background:var(--green);border-radius:4px}
+.bar-row .fill.warn{background:var(--amber)}
+.bar-row .fill.bad{background:var(--red)}
+
+.tbl{width:100%;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);border-collapse:separate;border-spacing:0;overflow:hidden;font-size:14px}
+.tbl th{text-align:left;font-size:10px;color:var(--muted);letter-spacing:.1em;text-transform:uppercase;font-weight:600;padding:12px 16px;border-bottom:1px solid var(--border);background:var(--surface-2)}
+.tbl td{padding:13px 16px;border-bottom:1px solid var(--border);color:var(--muted);vertical-align:top}
+.tbl tr:last-child td{border-bottom:0}
+.tbl td strong{color:var(--text);font-weight:600}
+.tbl code{background:var(--surface-2);padding:1px 6px;border-radius:3px;color:var(--text);font-size:.86em}
+.tag{display:inline-block;font-size:10px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;padding:2px 7px;border-radius:3px}
+.tag.local{background:rgba(0,204,102,.12);color:var(--green)}
+.tag.net{background:rgba(255,149,0,.12);color:var(--amber)}
+
+ul.checks{list-style:none;padding:0;margin:0}
+ul.checks li{padding:12px 0;color:var(--muted);border-bottom:1px solid var(--border);display:flex;gap:12px;align-items:flex-start;font-size:14px}
+ul.checks li:last-child{border-bottom:none}
+ul.checks li::before{content:"✓";color:var(--green);font-weight:700;flex-shrink:0;margin-top:1px}
+ul.checks li.no::before{content:"✕";color:var(--amber)}
+ul.checks li strong{color:var(--text);font-weight:600}
+
+pre{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:18px 20px;overflow:auto;font-family:var(--mono);font-size:13px;line-height:1.65;color:var(--text)}
+pre .c{color:var(--faint)}
+pre .k{color:var(--green)}
+
+.faq dt{font-weight:600;color:var(--text);margin-top:22px;font-size:15px}
+.faq dt:first-child{margin-top:0}
+.faq dd{color:var(--muted);margin:6px 0 0;font-size:14px}
+
+footer{margin-top:80px;padding-top:28px;border-top:1px solid var(--border);color:var(--faint);font-size:13px}
+footer .line{display:flex;gap:16px;flex-wrap:wrap;align-items:center;margin-bottom:14px}
+footer .siblings a{color:var(--muted)}
+footer .meta{color:var(--faint)}
+
+@media (max-width:600px){
+  h1{font-size:32px}
+  .lede{font-size:17px}
+  header{padding:44px 20px 44px}
+  main{padding:0 20px 64px}
+  .bar-row{grid-template-columns:104px 40px 1fr;gap:8px}
+}
+</style>
+</head>
+<body>
+<a class="skip" href="#what">Skip to content</a>
+
+<header>
+  <div class="inner">
+    <div class="brand">
+      <svg viewBox="0 0 100 100" aria-hidden="true"><path fill="#00cc66" d="M50 2C54 38 62 46 98 50C62 54 54 62 50 98C46 62 38 54 2 50C38 46 46 38 50 2Z"/></svg>
+      <span>Stelnyx</span><span class="sep">/</span><span class="self">SecGate</span>
+    </div>
+    <h1>Five scanners.<br>One gate. One <span class="accent">exit code</span>.</h1>
+    <p class="lede">SecGate orchestrates <strong>Semgrep, Gitleaks, osv-scanner, Trivy and npm audit</strong> behind a single command. It normalizes their output into one report and fails the pipeline on CRITICAL or HIGH findings.</p>
+    <p class="sub">No account. No telemetry. The report is written to local files. SecGate doesn't ship its own engine — the value is <strong>orchestration, normalization, and one exit code</strong>.</p>
+
+    <div class="install" id="install">
+      <span class="cmd"><span class="prompt">$ </span><span id="cmd-text">npx @stelnyx/secgate .</span></span>
+      <button id="copy-btn" type="button" aria-label="Copy install command">Copy</button>
+    </div>
+
+    <div class="cta-row">
+      <a class="btn btn-primary" href="https://www.npmjs.com/package/@stelnyx/secgate">View on npm</a>
+      <a class="btn btn-secondary" href="https://github.com/Stelnyx/SecGate">GitHub repo</a>
+      <a class="btn btn-secondary" href="https://github.com/Stelnyx/SecGate#readme">Read the docs</a>
+    </div>
+
+    <div class="badges">
+      <a href="https://www.npmjs.com/package/@stelnyx/secgate"><img alt="npm version" src="https://img.shields.io/npm/v/@stelnyx/secgate.svg?style=flat-square&labelColor=0a0a0a&color=00cc66"></a>
+      <a href="https://github.com/Stelnyx/SecGate/blob/main/LICENSE"><img alt="license MIT" src="https://img.shields.io/badge/license-MIT-00cc66.svg?style=flat-square&labelColor=0a0a0a"></a>
+      <img alt="node >=18" src="https://img.shields.io/badge/node-%E2%89%A518-00cc66.svg?style=flat-square&labelColor=0a0a0a">
+      <img alt="npm provenance signed" src="https://img.shields.io/badge/npm%20provenance-signed-00cc66.svg?style=flat-square&labelColor=0a0a0a">
+    </div>
+
+    <p class="proof">SecGate is a <strong>triage accelerator</strong>, not a defect oracle. Early release <code>v0.2.13</code>, published with npm provenance. Report vulnerabilities via SECURITY.md.</p>
+  </div>
+</header>
+
+<main>
+
+<section id="what">
+  <h2>One command. Four artifacts.</h2>
+  <p class="h2-note">SecGate runs whatever scanners are on your <code>$PATH</code> and produces this — every finding traces to a named tool.</p>
+  <div class="grid">
+    <div class="card">
+      <div class="num">01</div>
+      <h3>One JSON report</h3>
+      <p>Normalized findings across every scanner, with a deterministic 0–100 security score for CI dashboards.</p>
+    </div>
+    <div class="card">
+      <div class="num">02</div>
+      <h3>One HTML report</h3>
+      <p>Per-scanner tabs, dark mode, zero external assets — a single self-contained file.</p>
+    </div>
+    <div class="card">
+      <div class="num">03</div>
+      <h3>One SARIF file</h3>
+      <p>SARIF 2.1.0, ready to upload straight to GitHub Code Scanning.</p>
+    </div>
+    <div class="card">
+      <div class="num">04</div>
+      <h3>One exit code</h3>
+      <p><code>1</code> on CRITICAL or HIGH findings — blocks the pipeline. No babysitting.</p>
+    </div>
+  </div>
+</section>
+
+<section id="noise">
+  <h2>98% of the noise, demoted</h2>
+  <p>The wrapped scanners are each noisy in isolation — industry estimate puts ~70% of raw SAST/SCA output at signal-less. SecGate's job is to surface what's actionable and demote the rest. Dogfooded against a 2,628-file production codebase:</p>
+  <div class="noise">
+    <div class="col"><div class="big in">1,858</div><div class="lbl">raw findings</div></div>
+    <div class="col"><div class="big out">46</div><div class="lbl">actionable findings</div></div>
+    <div class="col"><div class="big pct">98%</div><div class="lbl">noise demoted</div></div>
+  </div>
+  <p style="margin-top:16px">Findings are <strong>never dropped</strong> — demotion is presentation-only and the exit code is unchanged. The default <code>curated</code> profile collapses known-noisy patterns (license rows, base-image LOW/MED CVEs, 5-year-old non-critical CVEs) into an Informational block. Run <code>--profile strict</code> for a full audit view.</p>
+</section>
+
+<section id="score">
+  <h2>Security Score</h2>
+  <p class="h2-note">Every run produces a deterministic 0–100 score alongside the binary gate. Sample below.</p>
+  <div class="score">
+    <div class="head">
+      <span class="n">62</span><span class="d">/ 100 &nbsp;·&nbsp; rule v1</span>
+      <span class="band">Mixed</span>
+    </div>
+    <div class="bar-row"><span class="name">Semgrep</span><span class="val">97</span><span class="track"><span class="fill" style="width:97%"></span></span></div>
+    <div class="bar-row"><span class="name">Gitleaks</span><span class="val">75</span><span class="track"><span class="fill warn" style="width:75%"></span></span></div>
+    <div class="bar-row"><span class="name">npm audit</span><span class="val">90</span><span class="track"><span class="fill" style="width:90%"></span></span></div>
+    <div class="bar-row"><span class="name">osv-scanner</span><span class="val">100</span><span class="track"><span class="fill" style="width:100%"></span></span></div>
+    <div class="bar-row"><span class="name">Trivy</span><span class="val">62</span><span class="track"><span class="fill bad" style="width:62%"></span></span></div>
+  </div>
+  <p style="margin-top:16px">Penalty per finding: CRITICAL −25 · HIGH −10 · MEDIUM −3 · LOW −1. Thresholds: green ≥ 90, amber ≥ 70, red &lt; 70. The binary gate (exit 1 on CRITICAL/HIGH) is independent — the score is for trend tracking.</p>
+</section>
+
+<section id="scanners">
+  <h2>The five scanners</h2>
+  <p class="h2-note">Missing binaries are skipped gracefully and noted in the report. No scanner is required.</p>
+  <table class="tbl">
+    <thead><tr><th>Scanner</th><th>Category</th><th>Network</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Semgrep</strong></td><td>SAST — static code, 10+ languages, OSS ruleset</td><td><span class="tag local">Local</span></td></tr>
+      <tr><td><strong>Gitleaks</strong></td><td>Secrets — working tree + git history, redacted</td><td><span class="tag local">Local</span></td></tr>
+      <tr><td><strong>npm audit</strong></td><td>SCA — Node dependency tree</td><td><span class="tag net">Network</span></td></tr>
+      <tr><td><strong>osv-scanner</strong></td><td>Polyglot SCA — npm, PyPI, Go, Cargo, Maven, more</td><td><span class="tag net">Network</span></td></tr>
+      <tr><td><strong>Trivy</strong></td><td>IaC + license + base-image CVEs</td><td><span class="tag net">Network</span></td></tr>
+    </tbody>
+  </table>
+  <p style="margin-top:16px">SecGate itself makes <strong>no network calls</strong> — no telemetry, no phone-home. But three of the five wrapped scanners query advisory databases to do their job. "No telemetry" is exact; "fully air-gapped" is not — run offline and the network scanners degrade or skip, which SecGate reports.</p>
+</section>
+
+<section id="honesty">
+  <h2>What SecGate is — and isn't</h2>
+  <p>SecGate is a <strong>CI gate</strong>, not a SOC platform, a compliance tool, or a vulnerability-management system.</p>
+  <ul class="checks">
+    <li><strong>It is zero-config orchestration.</strong> Five industry-standard scanners, one command, one normalized report, one exit code. MIT.</li>
+    <li><strong>It is local-output-only.</strong> The report lands as files on your disk. No account, no dashboard, no hosted state.</li>
+    <li><strong>It is honest about noise.</strong> The curated profile demotes — it never deletes. Suppressed findings get their own audited block with per-rule counts.</li>
+    <li class="no"><strong>It is not a defect oracle.</strong> Every finding originates from one of the five underlying tools — SecGate ships no analysis engine of its own.</li>
+    <li class="no"><strong>It is not SaaS-grade triage.</strong> Need a managed vuln DB, Jira sync, or compliance workflow? Buy Snyk or Aikido — SecGate's niche is the gate.</li>
+  </ul>
+</section>
+
+<section id="ci">
+  <h2>Drop it into CI</h2>
+  <p>Exit <code>1</code> on CRITICAL or HIGH findings blocks the pipeline. One line:</p>
+  <pre><span class="c"># .github/workflows/secgate.yml</span>
+- name: Run SecGate
+  <span class="k">run:</span> npx @stelnyx/secgate .
+  <span class="c"># exits 1 on CRITICAL or HIGH findings — blocks the pipeline</span></pre>
+  <p style="margin-top:14px">A composite GitHub Action is published at <code>Stelnyx/SecGate/.github/actions/secgate@main</code> — emits JSON, HTML and SARIF, and exposes a <code>sarif-path</code> output for direct upload to Code Scanning. Adopt on a legacy repo with the baseline workflow: <code>--update-baseline</code> once, then <code>--baseline</code> fails only on net-new findings.</p>
+</section>
+
+<section id="faq" class="faq">
+  <h2>Common questions</h2>
+  <dl>
+    <dt>Does my code leave my machine?</dt>
+    <dd>SecGate itself makes no network calls and writes the report locally. But npm audit, osv-scanner and Trivy query advisory databases — they send dependency manifests / image coordinates, not your source. Air-gapped CI runs SecGate fine; those three scanners degrade or skip and SecGate reports it.</dd>
+    <dt>Is it deterministic?</dt>
+    <dd>Yes. Same findings produce JSON-byte-identical output, score and gate status every run. Two test suites lock the contract — <code>determinism.mjs</code> and an 11-finding <code>golden-secgate.mjs</code> fixture.</dd>
+    <dt>What do I need installed?</dt>
+    <dd>Node ≥ 18. The external scanners are optional — install only the ones you want (<code>brew install semgrep gitleaks osv-scanner trivy</code>). Missing binaries are skipped and noted.</dd>
+    <dt>Will it overwhelm me with findings on a legacy repo?</dt>
+    <dd>No. The curated profile demotes ~98% of scanner noise to a collapsed Informational block, and the baseline workflow lets you accept the current state and fail only on net-new findings.</dd>
+    <dt>What does it cost?</dt>
+    <dd>Nothing. MIT licensed, published on npm with provenance. <code>npx @stelnyx/secgate .</code> and you're done.</dd>
+  </dl>
+</section>
+
+<section id="start">
+  <h2>Gate your pipeline now</h2>
+  <p>No install, no signup, no config required. Point it at a directory.</p>
+  <div class="install" style="margin-top:8px">
+    <span class="cmd"><span class="prompt">$ </span>npx @stelnyx/secgate .</span>
+  </div>
+  <div class="cta-row" style="margin-top:8px">
+    <a class="btn btn-primary" href="https://www.npmjs.com/package/@stelnyx/secgate">View on npm</a>
+    <a class="btn btn-secondary" href="https://github.com/Stelnyx/SecGate">Star on GitHub</a>
+  </div>
+</section>
+
+<footer>
+  <div class="line siblings">
+    <span class="meta">Part of the Stelnyx line:</span>
+    <a href="https://github.com/Stelnyx/LuxScope">LuxScope</a>
+    <a href="https://github.com/Stelnyx/LuxFaber">LuxFaber</a>
+    <span class="self" style="color:var(--green)">SecGate</span>
+    <a href="https://github.com/Stelnyx/ApiGate">ApiGate</a>
+  </div>
+  <div class="meta">SecGate is open source under the MIT license · <a href="https://github.com/Stelnyx/SecGate">github.com/Stelnyx/SecGate</a> · Report vulnerabilities via <a href="https://github.com/Stelnyx/SecGate/blob/main/SECURITY.md">SECURITY.md</a></div>
+</footer>
+
+</main>
+
+<script>
+(function(){
+  var btn=document.getElementById('copy-btn'),txt=document.getElementById('cmd-text');
+  if(!btn||!txt)return;
+  btn.addEventListener('click',function(){
+    var s=txt.textContent;
+    function done(){btn.textContent='Copied';btn.classList.add('copied');setTimeout(function(){btn.textContent='Copy';btn.classList.remove('copied');},1600);}
+    if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(s).then(done,done);}
+    else{var t=document.createElement('textarea');t.value=s;document.body.appendChild(t);t.select();try{document.execCommand('copy');}catch(e){}document.body.removeChild(t);done();}
+  });
+})();
+</script>
+</body>
+</html>

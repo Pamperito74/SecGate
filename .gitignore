@@ -1,6 +1,7 @@
 node_modules
 sec*.json
 *.html
+!docs/index.html
 
 # Local agent state
 /.claude/
