@@ -1,4 +1,12 @@
 # Roadmap — Lucen + SecGate
+
+> ⚠️ **LEGACY DOC — Lucen-era (2026-04-22).**
+> "Lucen" was renamed to **LuxScope**. SecGate is now maintenance-only legacy track; enterprise tier deferred to Year 2 (post-1k LuxScope paying users).
+> Current truth: `../../docs/ROADMAP.md` (Stelnyx-root) + LuxScope epic [#286](https://github.com/Stelnyx/LuxScope/issues/286).
+> Kept for historical reference; do not act on it.
+
+---
+
 **Last updated:** 2026-04-22
 **Strategy reference:** `docs/business-analysis.md`
 
