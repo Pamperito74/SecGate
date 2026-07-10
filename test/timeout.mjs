@@ -11,18 +11,20 @@ const hangArgs = ["-e", "setTimeout(() => {}, 30_000)"];
 
 {
   const t0 = Date.now();
-  const out = await runToolAsync(node, hangArgs, { timeout: 400 });
+  const result = await runToolAsync(node, hangArgs, { timeout: 400 });
   const elapsed = Date.now() - t0;
   assert.ok(elapsed < 5_000, `runToolAsync should be killed near 400ms, took ${elapsed}ms`);
-  assert.equal(out, "", "timed-out tool yields empty stdout");
+  assert.equal(result.stdout, "", "timed-out tool yields empty stdout");
+  assert.equal(result.timedOut, true, "timed-out async tool is classified");
 }
 
 {
   const t0 = Date.now();
-  const out = runTool(node, hangArgs, { timeout: 400 });
+  const result = runTool(node, hangArgs, { timeout: 400 });
   const elapsed = Date.now() - t0;
   assert.ok(elapsed < 5_000, `runTool should be killed near 400ms, took ${elapsed}ms`);
-  assert.equal(out, "", "timed-out tool yields empty stdout");
+  assert.equal(result.stdout, "", "timed-out tool yields empty stdout");
+  assert.equal(result.timedOut, true, "timed-out sync tool is classified");
 }
 
 console.log("✓ runTool / runToolAsync honor timeout (default 180s, overridable)");

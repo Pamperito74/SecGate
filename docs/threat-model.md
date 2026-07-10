@@ -94,7 +94,7 @@ Ranked by blast radius.
 | Threat | Mitigation |
 |--------|-----------|
 | Scanned repo includes `package.json` with malicious `preinstall`/`postinstall` | `--ignore-scripts` passed to `npm audit` (see #29). SecGate never runs `npm install` against target |
-| Symlink in scanned repo points outside target to exfil creds | `--strip-paths` normalizes all reported paths; scanner binaries inherit symlink handling from their own policies. Document: run in container with bind-mount read-only |
+| Symlink in scanned repo points outside target to exfil creds | SecGate's own preflight walk skips symlinks and tracks real directories to avoid cycles. Scanner binaries inherit their own symlink policies. Document: run in container with bind-mount read-only |
 | Attacker modifies `secgate-v7-report.json` between runs | Filename is predictable; CI artifact upload uses run-scoped storage. Do not trust reports from across runs |
 | Scanner binary tampered in-place | Future: verify SBOM + signatures (see #29). Today: rely on package-manager integrity |
 
@@ -117,8 +117,9 @@ Ranked by blast radius.
 
 | Threat | Mitigation |
 |--------|-----------|
-| Scanned repo contains ReDoS-triggering pattern that hangs Semgrep | Upstream scanner timeouts apply. Document: CI-level job timeout as belt-and-braces |
-| Giant binary blobs inflate scan runtime | Semgrep/Trivy skip binaries by default. `.gitleaksignore` respected |
+| Scanned repo contains ReDoS-triggering pattern that hangs Semgrep | SecGate wraps scanner invocations with hard process timeouts. A scanner timeout is reported as `error` / inconclusive, never `clean`. Document: CI-level job timeout as belt-and-braces |
+| Giant binary blobs inflate scan runtime | SecGate performs a bounded preflight walk, skips common dependency/VCS/build/vendor directories, skips symlinks, caps depth/file count/file size, and fails with a clear message when limits are exceeded |
+| Multi-project workspace contains many nested `node_modules` and `.git` directories | SecGate detects workspace-like targets and asks the user to scan a single project or pass `--allow-workspace` intentionally |
 | Fork bomb via malicious scanner substitute | Covered by Spoofing mitigations (pinning) |
 
 ### E — Elevation of Privilege
@@ -163,11 +164,13 @@ Cross-referenced with epic **#29 (hardening epic)**.
 
 | Mitigation | Status | Reference |
 |-----------|--------|-----------|
-| `--ignore-scripts` on all npm operations | Planned | #29 |
-| `--strip-paths` flag to remove absolute paths from reports | Planned | #29 |
+| `--ignore-scripts` on all npm operations | **Shipped** | `lib/intelligence.mjs` |
+| `--strip-paths` flag to remove absolute paths from reports | **Shipped** | README |
+| Bounded preflight walk with workspace detection | **Shipped** | README / `lib/walk.mjs` |
+| Hard scanner subprocess timeouts with explicit timeout classification | **Shipped** | `lib/utils.mjs` / `test/timeout.mjs` |
 | SBOM publication alongside npm releases | Planned | #29 |
 | Signed release binaries + provenance | **Shipped** (npm provenance) | README |
-| Argument-array `spawn()` (no shell) | **Shipped** | `secgate.js` |
+| Argument-array subprocess execution (no shell) | **Shipped** | `lib/utils.mjs` |
 | Dry-run default for remediation | **Shipped** | ADR-0003 |
 | Config file execution prohibited | Planned | #32 |
 | Scanner version pinning guide | Planned | `docs/tuning.md` |

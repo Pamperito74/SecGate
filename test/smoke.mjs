@@ -2,6 +2,7 @@
 
 import { spawnSync } from "child_process";
 import fs from "fs";
+import os from "os";
 import path from "path";
 import { fileURLToPath } from "url";
 
@@ -77,6 +78,80 @@ test("rejects non-directory target with exit 2", () => {
   const r = run([bin]);
   assertEq(r.code, 2, "exit");
   assertContains(r.stderr, "not a directory", "stderr");
+});
+
+test("workspace-looking target fails fast with clear message", () => {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "secgate-workspace-"));
+  try {
+    for (const name of ["api", "web", "worker"]) {
+      const project = path.join(workspace, name);
+      fs.mkdirSync(path.join(project, "node_modules", "dep"), { recursive: true });
+      fs.mkdirSync(path.join(project, ".git", "objects"), { recursive: true });
+      fs.writeFileSync(path.join(project, "package.json"), "{}");
+      fs.writeFileSync(path.join(project, "node_modules", "dep", "package.json"), "{}");
+      fs.writeFileSync(path.join(project, ".git", "objects", "ignored"), "ignored");
+    }
+
+    try {
+      fs.symlinkSync(workspace, path.join(workspace, "api", "cycle"));
+    } catch {}
+
+    const res = spawnSync(process.execPath, [bin, workspace], {
+      encoding: "utf-8",
+      cwd: workspace,
+      env: { ...process.env, PATH: "" },
+      timeout: 5_000,
+      maxBuffer: 64 * 1024 * 1024
+    });
+
+    assertEq(res.status ?? 1, 2, "exit");
+    assertContains(res.stdout || "", "Preparing scan", "preflight progress");
+    assertContains(res.stderr || "", "workspace with 3 sub-projects", "workspace message");
+  } finally {
+    fs.rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
+test("empty directory exits cleanly with no-match message", () => {
+  const empty = fs.mkdtempSync(path.join(os.tmpdir(), "secgate-empty-"));
+  try {
+    const res = spawnSync(process.execPath, [bin, empty], {
+      encoding: "utf-8",
+      cwd: empty,
+      env: { ...process.env, PATH: "" },
+      maxBuffer: 64 * 1024 * 1024
+    });
+    assertEq(res.status ?? 1, 0, "exit");
+    assertContains(res.stdout || "", "no scannable source", "no-match message");
+    assertContains(res.stdout || "", "STATUS: PASS", "status");
+  } finally {
+    fs.rmSync(empty, { recursive: true, force: true });
+  }
+});
+
+test("unwritable output directory exits 2 without stack trace", () => {
+  if (typeof process.getuid === "function" && process.getuid() === 0) {
+    console.log("  skip  unwritable output directory (root can write)");
+    return;
+  }
+  const targetDir = fs.mkdtempSync(path.join(os.tmpdir(), "secgate-target-"));
+  const outputDir = fs.mkdtempSync(path.join(os.tmpdir(), "secgate-nowrite-"));
+  try {
+    fs.chmodSync(outputDir, 0o500);
+    const res = spawnSync(process.execPath, [bin, targetDir, "--output-dir", outputDir], {
+      encoding: "utf-8",
+      cwd: targetDir,
+      env: { ...process.env, PATH: "" },
+      maxBuffer: 64 * 1024 * 1024
+    });
+    assertEq(res.status ?? 1, 2, "exit");
+    assertContains(res.stderr || "", "Cannot write to output directory", "stderr");
+    assertNotContains(res.stderr || "", "Error:", "no stack trace");
+  } finally {
+    fs.chmodSync(outputDir, 0o700);
+    fs.rmSync(targetDir, { recursive: true, force: true });
+    fs.rmSync(outputDir, { recursive: true, force: true });
+  }
 });
 
 test("clean fixture → exit 0 PASS", () => {

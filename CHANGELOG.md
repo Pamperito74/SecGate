@@ -6,6 +6,26 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) + [Semantic Ver
 
 ## [Unreleased]
 
+## [0.2.14] - 2026-07-10
+
+### Fixed
+- Added a bounded scan preflight before launching external scanners so large
+  workspace-like targets no longer appear to hang after the banner. The walk
+  skips dependency, VCS, vendor, and build-output directories by default,
+  skips symlinks, caps depth/files/file size/time, and emits visible progress.
+- Detects targets that look like multi-project workspaces and exits with a
+  clear message unless `--allow-workspace` is supplied.
+- Reused the bounded walker for Trivy image Dockerfile discovery, replacing
+  the previous unbounded recursive walk.
+- Report-output failures now return a clear exit-2 message instead of a raw
+  stack trace.
+
+### Added
+- CLI safety knobs: `--max-files`, `--max-depth`, `--max-file-size`,
+  `--walk-timeout-ms`, and `--allow-workspace`.
+- Regression tests for bounded walking, vendor/build excludes, symlink skips,
+  workspace detection, empty targets, and unwritable output directories.
+
 ## [0.2.13] - 2026-05-19
 
 ### Added

@@ -114,7 +114,8 @@ Every tagged release (`vX.Y.Z`) ships with verifiable provenance:
 | Checksums | `SHA256SUMS` | SHA-256 manifest for tarball + SBOM |
 
 npm registry metadata also carries [npm provenance](https://docs.npmjs.com/generating-provenance-statements)
-(via `publishConfig.provenance: true`) for the `@stelnyx/secgate` package.
+through npm Trusted Publishing from the `Publish` GitHub Actions workflow for
+the `@stelnyx/secgate` package.
 
 ### Trust root (keyless cosign)
 
@@ -125,6 +126,10 @@ the exact workflow that produced it:
 - Expected OIDC issuer: `https://token.actions.githubusercontent.com`
 - Expected signer identity (regex):
   `^https://github\.com/Stelnyx/SecGate/\.github/workflows/release\.yml@refs/tags/.*`
+
+The npm publish identity is separate from the release-artifact signing identity:
+Trusted Publishing is configured for `.github/workflows/publish.yml`, while
+release tarballs/SBOMs are signed by `.github/workflows/release.yml`.
 
 The Sigstore transparency log (Rekor) entry is the public record. There is no
 "public key" to rotate; if the signer identity or issuer ever changes, that is

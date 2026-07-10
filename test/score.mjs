@@ -30,10 +30,6 @@ function test(name, fn) {
   }
 }
 
-function assert(cond, msg) {
-  if (!cond) throw new Error(msg ?? "assertion failed");
-}
-
 function assertEq(a, b, msg) {
   if (a !== b) throw new Error(`${msg ?? "eq"}: expected ${JSON.stringify(b)}, got ${JSON.stringify(a)}`);
 }

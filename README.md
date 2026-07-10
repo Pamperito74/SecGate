@@ -26,7 +26,7 @@ One command. One report. One exit code.
 
 **Honest positioning.** SecGate is a **triage accelerator**, not a defect oracle. Dogfooded against a 2,628-file production codebase: **1,858 → 46 actionable findings — 98% noise demoted**. The wrapped scanners are each noisy in isolation (industry estimate: ~70% of raw SAST/SCA output is signal-less). SecGate's job is to surface what's actionable and demote the rest — see [What we demote (and why)](#what-we-demote-and-why).
 
-**Status.** Early release (`v0.2.13`). Published with [npm provenance](https://docs.npmjs.com/generating-provenance-statements). Report vulnerabilities via [SECURITY.md](SECURITY.md).
+**Status.** Early release (`v0.2.14`). Releases publish from GitHub Actions with npm trusted publishing and provenance. Report vulnerabilities via [SECURITY.md](SECURITY.md).
 
 **Accuracy contract.** SecGate's aggregation pipeline is deterministic — same inputs produce JSON-byte-identical findings, score, and gate status across every run. Two test suites lock the contract:
 
@@ -104,7 +104,7 @@ SecGate itself makes **no network calls** — no telemetry, no account, no phone
 | osv-scanner | Queries the OSV.dev API for advisories matching your dependency manifests. |
 | Trivy | Downloads/updates its vulnerability database; pulls image layers when scanning container images. |
 
-So "no telemetry" is exact; "fully air-gapped" is not — run SecGate offline and `npm audit`, `osv-scanner`, and `Trivy` will degrade or skip (which SecGate reports). A first-class offline mode (skip the network scanners, or point them at a local DB mirror) is tracked in the issue backlog.
+So "no telemetry" is exact; "fully air-gapped" is not — run SecGate offline and `npm audit`, `osv-scanner`, and `Trivy` will degrade or skip (which SecGate reports). On first run, `osv-scanner` and Trivy may download vulnerability databases; SecGate prints a one-line note before starting those scanners so the initial delay is not mistaken for a hang. A first-class offline mode (skip the network scanners, or point them at a local DB mirror) is tracked in the issue backlog.
 
 ---
 
@@ -226,10 +226,25 @@ secgate /path/to/project --strip-paths
 # Show all findings inline (skip curated demotion)
 secgate . --profile strict
 
+# Raise bounded-walk limits for an unusually large single project
+secgate . --max-files 50000 --max-depth 32
+
+# Override workspace detection when you intentionally scan many sub-projects
+secgate /path/to/workspace --allow-workspace
+
 # Version / help
 secgate --version
 secgate --help
 ```
+
+SecGate is designed for a single project target. Before launching external
+scanners, it performs a bounded preflight walk that skips dependency, VCS,
+vendor, and build-output directories (`node_modules`, `.git`, `dist`, `build`,
+`coverage`, `vendor`, and common package-manager caches). Symlinks are skipped,
+large files are not parsed, and the walk is capped by `--max-files`,
+`--max-depth`, `--max-file-size`, and `--walk-timeout-ms`. If the target looks
+like a workspace with multiple sub-projects and no root `package.json`, SecGate
+exits with a clear message unless `--allow-workspace` is supplied.
 
 **Exit codes**
 
@@ -420,6 +435,19 @@ uses: Stelnyx/SecGate/.github/actions/secgate@<full-sha>
 ```
 
 See [`.github/workflows/example-secgate.yml`](.github/workflows/example-secgate.yml) for a complete reference workflow.
+
+### Releasing SecGate
+
+Package releases are published by the `Publish` GitHub Actions workflow when a
+GitHub Release is published. The workflow uses npm trusted publishing through
+OIDC, so there is no npm token in GitHub secrets and no local publish step.
+
+Release summary: bump the npm version, commit and push `main`, push a matching
+`vX.Y.Z` tag, create a GitHub Release from that tag, then confirm the dependency
+guard, workflow, and npm provenance badge. The release path runs
+`npm run check:deps` to block accidental `file:`, `link:`, or `workspace:`
+dependencies before publish. See [CONTRIBUTING.md](CONTRIBUTING.md#releases)
+for the exact checklist and npm Trusted Publisher settings.
 
 ---
 

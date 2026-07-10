@@ -96,6 +96,8 @@ Open Claude Code in any project. Type `/security-scan .`
 | semgrep | `brew install semgrep` or `pip install semgrep` |
 | gitleaks | `brew install gitleaks` |
 | npm | bundled with Node.js |
+| osv-scanner | `brew install osv-scanner` |
+| trivy | `brew install trivy` |
 
 Skill runs without any of these — missing tools are skipped and listed in output.
 

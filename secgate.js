@@ -29,6 +29,12 @@ import {
   computeScore,
   computeToolScores
 } from "./lib/score.mjs";
+import {
+  DEFAULT_WALK_LIMITS,
+  WalkLimitError,
+  parsePositiveInt,
+  scanTargetTree
+} from "./lib/walk.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const pkg = JSON.parse(
@@ -72,6 +78,17 @@ Options:
   --strip-paths       Relativize target to repo basename in the report.
                       Auto-enabled when CI=true.
   --format <fmt>      Output formats: json,html (default) or sarif
+  --max-files <n>     Maximum files to walk before aborting preflight
+                      (default: ${DEFAULT_WALK_LIMITS.maxFiles})
+  --max-depth <n>     Maximum directory depth to walk before aborting
+                      (default: ${DEFAULT_WALK_LIMITS.maxDepth})
+  --max-file-size <n> Maximum file size in bytes for lightweight parsing
+                      (default: ${DEFAULT_WALK_LIMITS.maxFileSizeBytes})
+  --walk-timeout-ms <n>
+                      Maximum preflight walk time before aborting
+                      (default: ${DEFAULT_WALK_LIMITS.timeoutMs})
+  --allow-workspace   Allow scanning a directory that looks like a workspace
+                      containing multiple sub-projects.
   --baseline          Compare against baseline; fail only on net-new findings
   --update-baseline   Write current findings to baseline file then exit 0
   --debug             Print raw scanner output
@@ -128,6 +145,20 @@ const EMIT_SARIF   = FORMAT.split(",").map(s => s.trim()).includes("sarif");
 const BASELINE_MODE    = argv.includes("--baseline");
 const UPDATE_BASELINE  = argv.includes("--update-baseline");
 const PROFILE_FLAG     = argValue("--profile");
+const ALLOW_WORKSPACE  = argv.includes("--allow-workspace");
+
+let scanLimits;
+try {
+  scanLimits = {
+    maxFiles: parsePositiveInt(argValue("--max-files"), DEFAULT_WALK_LIMITS.maxFiles, "--max-files"),
+    maxDepth: parsePositiveInt(argValue("--max-depth"), DEFAULT_WALK_LIMITS.maxDepth, "--max-depth"),
+    maxFileSizeBytes: parsePositiveInt(argValue("--max-file-size"), DEFAULT_WALK_LIMITS.maxFileSizeBytes, "--max-file-size"),
+    timeoutMs: parsePositiveInt(argValue("--walk-timeout-ms"), DEFAULT_WALK_LIMITS.timeoutMs, "--walk-timeout-ms")
+  };
+} catch (e) {
+  console.error(e.message);
+  process.exit(2);
+}
 
 const target = path.resolve(rawTarget);
 
@@ -162,6 +193,13 @@ if (!OUTPUT_DIR_FLAG) {
     console.error(`--output-dir is not a directory: ${outputDir}`);
     process.exit(2);
   }
+}
+
+try {
+  fs.accessSync(outputDir, fs.constants.W_OK);
+} catch (e) {
+  console.error(`Cannot write to output directory ${outputDir}: ${e.message}`);
+  process.exit(2);
 }
 
 const repoName     = path.basename(path.resolve(target));
@@ -272,18 +310,82 @@ if (APPLY) {
 
 const addFinding = makeFindingProcessor(config, target, findings, suppressions);
 
+let treeStats;
+try {
+  console.log("\nPreparing scan: walking target with safety limits...");
+  treeStats = scanTargetTree(target, {
+    limits: scanLimits,
+    onProgress: stats => {
+      console.log(
+        `Preparing scan: ${stats.files} files, ${stats.dirs} dirs ` +
+          `(skipped ${stats.skippedDirs} dirs, ${stats.skippedSymlinks} symlinks)`
+      );
+    }
+  });
+} catch (e) {
+  if (e instanceof WalkLimitError) {
+    console.error(e.message);
+    if (e.stats) {
+      console.error(
+        `Walk stopped after ${e.stats.files} files, ${e.stats.dirs} dirs, ` +
+          `${e.stats.skippedDirs} skipped dirs, ${e.stats.skippedSymlinks} skipped symlinks.`
+      );
+    }
+    process.exit(2);
+  }
+  console.error(`Cannot scan target ${target}: ${e.message}`);
+  process.exit(2);
+}
+
+if (!ALLOW_WORKSPACE && !treeStats.rootHasPackageJson && treeStats.packageJsonFiles > 1) {
+  console.error(
+    `This looks like a workspace with ${treeStats.packageJsonFiles} sub-projects. ` +
+      "Point SecGate at a single project or pass --allow-workspace."
+  );
+  process.exit(2);
+}
+
+if (treeStats.sourceFiles === 0) {
+  console.log("Preparing scan: no scannable source, manifest, lockfile, or Dockerfile entries found.");
+} else {
+  console.log(
+    `Preparing scan: ${treeStats.sourceFiles} scannable files found ` +
+      `(${treeStats.skippedDirs} dirs, ${treeStats.skippedSymlinks} symlinks, ` +
+      `${treeStats.skippedLargeFiles} large files skipped).`
+  );
+}
+
+if (config.scanners.osv !== false || config.scanners.trivy !== false) {
+  console.log("Note: osv-scanner and Trivy may download vulnerability databases on first run; this can take a moment.");
+}
+
 function applyResult(toolKey, result) {
   toolStatus[toolKey] = result.status;
   if (result.skipReason) toolSkipReason[toolKey] = result.skipReason;
 }
 
+async function runScanner(label, fn) {
+  console.log(`Starting ${label}...`);
+  let result;
+  try {
+    result = await fn();
+  } catch (e) {
+    const message = e && e.message ? e.message : String(e);
+    console.error(`${label} failed: ${message}`);
+    result = { status: "error", skipReason: message };
+  }
+  const reason = result.skipReason ? ` (${result.skipReason})` : "";
+  console.log(`Finished ${label}: ${result.status}${reason}`);
+  return result;
+}
+
 const [sgRes, glRes, npmRes, osvRes, trivyRes, trivyImgRes] = await Promise.all([
-  runSemgrep(target, config, addFinding, debugFn),
-  runGitleaks(target, config, addFinding, debugFn),
-  runNpmAudit(target, config, addFinding, debugFn),
-  runOsvScanner(target, config, addFinding, debugFn),
-  runTrivy(target, config, addFinding, debugFn),
-  runTrivyImage(target, config, addFinding, debugFn)
+  runScanner("Semgrep", () => runSemgrep(target, config, addFinding, debugFn)),
+  runScanner("Gitleaks", () => runGitleaks(target, config, addFinding, debugFn)),
+  runScanner("npm audit", () => runNpmAudit(target, config, addFinding, debugFn)),
+  runScanner("osv-scanner", () => runOsvScanner(target, config, addFinding, debugFn)),
+  runScanner("Trivy fs", () => runTrivy(target, config, addFinding, debugFn)),
+  runScanner("Trivy image", () => runTrivyImage(target, config, addFinding, debugFn, scanLimits))
 ]);
 
 applyResult("semgrep",    sgRes);
@@ -398,10 +500,19 @@ if (STRIP_PATHS) {
   applyPathStripping(report, target, repoName);
 }
 
-fs.writeFileSync(outputFile, JSON.stringify(report, null, 2));
+function writeReportFile(file, contents) {
+  try {
+    fs.writeFileSync(file, contents);
+  } catch (e) {
+    console.error(`Cannot write report ${file}: ${e.message}`);
+    process.exit(2);
+  }
+}
+
+writeReportFile(outputFile, JSON.stringify(report, null, 2));
 
 const htmlFile = path.join(outputDir, `${repoName}.html`);
-fs.writeFileSync(htmlFile, renderHtml(report, repoName, config.profile));
+writeReportFile(htmlFile, renderHtml(report, repoName, config.profile));
 
 console.log("\nReport saved:", outputFile);
 console.log("HTML report:", htmlFile);
@@ -409,7 +520,7 @@ console.log("HTML report:", htmlFile);
 if (EMIT_SARIF) {
   const sarifFile = path.join(outputDir, `${repoName}.sarif.json`);
   const sarif = buildSarif(report, repoName, target);
-  fs.writeFileSync(sarifFile, JSON.stringify(sarif, null, 2));
+  writeReportFile(sarifFile, JSON.stringify(sarif, null, 2));
   console.log("SARIF report:", sarifFile);
 }
 

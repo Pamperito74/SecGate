@@ -10,11 +10,6 @@ on:
         description: "Tag to build (e.g. v0.2.5) — must already exist in the repo"
         required: true
         type: string
-      skip_npm:
-        description: "Skip npm publish (use for re-runs of already-published versions)"
-        required: false
-        default: false
-        type: boolean
 
 permissions: {}
 
@@ -228,48 +223,3 @@ jobs:
             dist/${{ needs.build.outputs.sbom_name }}.cosign.bundle
             dist/${{ needs.provenance.outputs.provenance-name }}
             dist/SHA256SUMS
-
-  publish-npm:
-    name: npm publish (provenance)
-    needs: [sign-and-release]
-    if: ${{ !inputs.skip_npm }}
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      id-token: write
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v5
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v5
-        with:
-          node-version: "22"
-          registry-url: "https://registry.npmjs.org"
-
-      - name: Install external scanners
-        uses: ./.github/actions/install-scanners
-
-      - name: Install npm dependencies
-        run: npm ci
-
-      - name: Self-scan (block on CRITICAL/HIGH)
-        run: node secgate.js .
-
-      - name: Publish to npm with provenance
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: npm publish --access public --provenance
-
-      - name: Verify the published package installs and runs
-        run: |
-          PKG_VERSION="$(node -p "require('./package.json').version")"
-          echo "Waiting for @stelnyx/secgate@${PKG_VERSION} to be visible on the registry…"
-          for i in 1 2 3 4 5 6; do
-            if npm view "@stelnyx/secgate@${PKG_VERSION}" version >/dev/null 2>&1; then break; fi
-            sleep 15
-          done
-          npm install -g "@stelnyx/secgate@${PKG_VERSION}"
-          secgate --version
-          secgate --help

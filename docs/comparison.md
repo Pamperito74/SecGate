@@ -20,7 +20,7 @@ All comparisons reflect the **free / open-source tier** of each product as of 20
 | **Secrets detection** | via Gitleaks | basic | yes | no | yes |
 | **IaC misconfiguration** | via Trivy | yes | yes | partial | yes |
 | **License scanning** | via Trivy | yes | yes | no | yes |
-| **Container image scanning** | **no** (see #36) | yes | **yes** | no | yes |
+| **Container image scanning** | base images only | yes | **yes** | no | yes |
 | **SARIF output** | yes (v0.2.0) | yes | yes | yes | yes |
 | **Baseline / ratcheting** | yes (v0.2.0) | yes | no | yes | yes |
 | **Auto-fix** | npm only (ADR-0002) | yes (paid mostly) | no | no | limited |
@@ -49,7 +49,7 @@ All comparisons reflect the **free / open-source tier** of each product as of 20
 - You need **runtime monitoring** (Snyk Runtime) beyond CI-time scanning.
 
 ### Trivy (standalone) wins when
-- You need **deep container image scanning** — SecGate does not scan image layers today.
+- You need **deep container image scanning** — SecGate scans Dockerfile base images, but does not build and scan your final application image layers.
 - You're only scanning containers and don't need SAST/secrets in the same pass.
 
 ### Semgrep OSS wins when

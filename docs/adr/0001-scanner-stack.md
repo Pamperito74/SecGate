@@ -22,7 +22,7 @@ SecGate's value is orchestration. The stack of upstream scanners defines what Se
 - **Gitleaks** — secrets. Purpose-built, fast, handles git history.
 - **npm audit** — Node SCA. Ships with npm; zero install cost when Node is present.
 - **osv-scanner** — polyglot SCA. Google-maintained, uses OSV.dev (open advisory DB).
-- **Trivy** — IaC + license. Aqua Security, huge policy bundle, active development.
+- **Trivy** — IaC + license + discovered base-image CVEs. Aqua Security, huge policy bundle, active development.
 
 ## Consequences
 
@@ -37,7 +37,7 @@ SecGate's value is orchestration. The stack of upstream scanners defines what Se
 ### Negative
 
 - Five binaries to install. Mitigated by graceful skip when absent, documented install commands, and Homebrew Bundle / Dockerfile examples.
-- No container image scanning today (Trivy `fs` mode only). Tracked in #36.
+- Base-image scanning is covered by discovering Dockerfile `FROM` references and running Trivy `image` mode. SecGate still does not build and scan final application image layers.
 - Semgrep's OSS ruleset is narrower than Semgrep Pro — organizations wanting proprietary rules need to BYO.
 
 ### Neutral
@@ -65,4 +65,3 @@ Rejected. Months of work, no unique value vs orchestration, and we'd still want 
 
 - [`docs/coverage.md`](../coverage.md)
 - [`docs/comparison.md`](../comparison.md)
-- Issue #36 — container image scanning plan

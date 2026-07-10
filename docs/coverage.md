@@ -19,7 +19,7 @@ flowchart LR
   SEC --> GIT[Gitleaks<br/>Secrets]
   SEC --> NPM[npm audit<br/>SCA - Node only]
   SEC --> OSV[osv-scanner<br/>SCA - polyglot]
-  SEC --> TRIV[Trivy<br/>IaC + License]
+  SEC --> TRIV[Trivy<br/>IaC + License + Image]
 ```
 
 ---
@@ -34,7 +34,7 @@ flowchart LR
 | **Secrets** (credentials in code/history) | Gitleaks | Scans working tree by default. Extends to git history when `.git/` present. Redacts match bodies in output. |
 | **IaC misconfiguration** | Trivy (`fs` mode) | Terraform, CloudFormation, Kubernetes manifests, Dockerfile, Helm, Ansible. Uses Trivy's default policy bundle. |
 | **License** | Trivy (`fs` mode) | Detects package licenses and flags restricted (copyleft) licenses per Trivy defaults. |
-| **Container image** | **Not covered today** — `trivy fs` reads Dockerfiles but does not scan built image layers. See [`#36`](https://github.com/Stelnyx/SecGate/issues/36) for `trivy image` integration. |
+| **Container base image** | Trivy (`image` mode) | Discovers `FROM` images in Dockerfiles and scans those base images. Skips `scratch`. First run may download Trivy's vulnerability DB and image metadata. |
 | **DAST** (runtime testing) | Not covered — out of scope for a CI gate. |
 | **Cloud posture (CSPM)** | Not covered — use cloud-native tools. |
 
@@ -45,7 +45,7 @@ flowchart LR
 Some categories have deliberate overlap for defense in depth:
 
 - **Node dependencies** — both `npm audit` and `osv-scanner` run. They pull from different advisory sources (GitHub Advisories vs OSV.dev). Findings are surfaced separately per scanner in the report; deduplication by CVE ID is planned but not yet implemented.
-- **Dockerfile** — Semgrep has Dockerfile rules; Trivy scans Dockerfile for misconfig. Different lenses (code smell vs policy), both kept.
+- **Dockerfile** — Semgrep has Dockerfile rules; Trivy scans Dockerfile for misconfig, and SecGate separately asks Trivy to scan discovered base images. Different lenses (code smell vs policy vs base-image CVEs), all kept.
 
 ---
 
@@ -53,9 +53,13 @@ Some categories have deliberate overlap for defense in depth:
 
 Honesty matters. These are known limits of the current bundle.
 
-### 1. Container image layers
+### 1. Built application image layers
 
-`trivy fs` scans the filesystem — it reads `Dockerfile` as a text file but does **not** resolve base images, pull layers, or enumerate installed OS packages inside the image. For full container image scanning (apk/apt/yum package CVEs, layer-by-layer diff), `trivy image <tag>` is needed. Planned: **#36**.
+SecGate scans base images referenced by Dockerfiles, but it does not build the
+application image and scan the resulting final artifact. If your Dockerfile
+installs packages during build, those final-layer packages are outside
+SecGate's current coverage. Run `trivy image <your-built-tag>` directly for
+full image-layer scanning.
 
 ### 2. Private SAST rule packs
 

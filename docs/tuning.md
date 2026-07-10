@@ -4,9 +4,7 @@
 
 # Tuning SecGate
 
-How to adjust severity thresholds, baseline noisy findings, suppress rules, toggle scanners, and tune CI vs local defaults.
-
-> Flags marked **(planned)** are not yet shipped; the rest of this document reflects `v0.2.7` behavior. The config epic tracking remaining work: [**#32**](https://github.com/Stelnyx/SecGate/issues/32).
+How to adjust severity thresholds, baseline noisy findings, suppress rules, toggle scanners, and tune CI vs local defaults. This document reflects the current `v0.2.14` CLI.
 
 ---
 
@@ -166,9 +164,56 @@ Any scanner set to `false` is skipped and reported as `status: "skipped"`. To ru
 
 ### Alternative — remove the binary
 
-SecGate skips any scanner whose binary is not on `$PATH` (reported as `skipped` with reason `binary not found`). Useful when you control the CI image — install only the scanners you want to run.
+SecGate skips any scanner whose binary is not on `$PATH` (reported as `skipped` with reason `not installed`). Useful when you control the CI image — install only the scanners you want to run.
 
 CLI flags `--disable <list>` and `--only <scanner>` are planned — see [#32](https://github.com/Stelnyx/SecGate/issues/32).
+
+---
+
+## Target Size and Walk Limits
+
+SecGate is designed to scan one project at a time. Before launching scanners,
+it performs a bounded preflight walk so large workspaces, symlink cycles, deep
+trees, and vendored dependency folders do not look like a silent hang.
+
+Default exclusions include dependency, VCS, vendor, and build-output
+directories such as `node_modules`, `.git`, `vendor`, `dist`, `build`,
+`coverage`, `.next`, `.nuxt`, `out`, and package-manager caches. Symlinks are
+skipped. Large files are counted but not parsed for lightweight preflight
+classification.
+
+Useful CLI knobs:
+
+```bash
+# Raise limits for an unusually large single project
+secgate . --max-files 50000 --max-depth 32
+
+# Raise the per-file cap for Dockerfile/source preflight parsing
+secgate . --max-file-size 4194304
+
+# Raise the preflight walk timeout
+secgate . --walk-timeout-ms 60000
+
+# Override workspace detection when intentionally scanning many sub-projects
+secgate /path/to/workspace --allow-workspace
+```
+
+If a target looks like a workspace with multiple sub-projects and no root
+`package.json`, SecGate exits with a clear message. Prefer scanning each
+project directory separately unless the broader workspace scan is intentional.
+
+---
+
+## Scanner Timeouts and First-Run Downloads
+
+Every external scanner invocation has a hard process timeout. The default is
+180 seconds; Trivy image scans use 120 seconds per image reference. A timeout
+is reported as `status: "error"` with an inconclusive timeout reason, never as
+`clean`.
+
+`osv-scanner` and Trivy may download vulnerability databases on first run.
+SecGate prints a note before starting those scanners. In CI, keep a job-level
+timeout as a belt-and-braces guard around the whole workflow.
 
 ---
 
@@ -177,11 +222,11 @@ CLI flags `--disable <list>` and `--only <scanner>` are planned — see [#32](ht
 | Setting | Local dev | CI |
 |---------|-----------|----|
 | Mode | `--apply` after review | dry-run (default) |
-| Threshold | `--fail-on critical,high,medium` (strict while developing) | `--fail-on critical,high` (default) |
+| Threshold | `.secgate.config.json` with `"failOn": ["critical","high","medium"]` while developing | default `["critical","high"]` |
 | Baseline | Not used — see every issue | Used — only fail on new |
 | Output | Human-readable summary + HTML | JSON artifact + HTML uploaded |
 | Scanner set | All | All |
-| Timeout | CLI default | Add job-level timeout (15–30 min) |
+| Timeout | Scanner hard timeout + preflight walk limits | Add job-level timeout (15–30 min) |
 | Clone depth | Full | `fetch-depth: 0` for secrets history |
 
 ### Recommended CI config (GitHub Actions)
@@ -257,15 +302,17 @@ secgate . --update-baseline
 Your repo has `app/` (Node) and `infra/` (Terraform). You want Trivy only against `infra/`.
 
 ```bash
-# Today — two configs, two runs
+# Recommended — two configs, two runs
 # app/.secgate.config.json          → { "scanners": { "trivy": false } }
 # infra/.secgate.config.json        → { "scanners": { "semgrep": false, "gitleaks": false, "npm": false, "osv": false } }
 
 secgate app/
 secgate infra/
 
-# Or run against the whole repo and accept that every scanner scans every
-# directory. Scoping today is path-based, not scanner-per-path.
+# Or run against the whole workspace intentionally.
+secgate . --allow-workspace
+
+# Scoping today is path-based, not scanner-per-path.
 # CLI equivalents (--disable, --only) planned: #32.
 ```
 

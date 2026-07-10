@@ -314,11 +314,13 @@ footer .meta{color:var(--faint)}
   <h2>Common questions</h2>
   <dl>
     <dt>Does my code leave my machine?</dt>
-    <dd>SecGate itself makes no network calls and writes the report locally. But npm audit, osv-scanner and Trivy query advisory databases — they send dependency manifests / image coordinates, not your source. Air-gapped CI runs SecGate fine; those three scanners degrade or skip and SecGate reports it.</dd>
+    <dd>SecGate itself makes no network calls and writes the report locally. But npm audit, osv-scanner and Trivy query advisory databases — they send dependency manifests / image coordinates, not your source. On first run, osv-scanner and Trivy may download vulnerability databases; SecGate prints a note before those scanners start. Air-gapped CI runs SecGate fine; those three scanners degrade or skip and SecGate reports it.</dd>
     <dt>Is it deterministic?</dt>
     <dd>Yes. Same findings produce JSON-byte-identical output, score and gate status every run. Two test suites lock the contract — <code>determinism.mjs</code> and an 11-finding <code>golden-secgate.mjs</code> fixture.</dd>
     <dt>What do I need installed?</dt>
     <dd>Node ≥ 18. The external scanners are optional — install only the ones you want (<code>brew install semgrep gitleaks osv-scanner trivy</code>). Missing binaries are skipped and noted.</dd>
+    <dt>Can it handle large workspaces?</dt>
+    <dd>SecGate is designed for one project target. It performs a bounded preflight walk, skips dependency/VCS/build/vendor directories, skips symlinks, and exits clearly if a target looks like a multi-project workspace unless <code>--allow-workspace</code> is supplied.</dd>
     <dt>Will it overwhelm me with findings on a legacy repo?</dt>
     <dd>No. The curated profile demotes ~98% of scanner noise to a collapsed Informational block, and the baseline workflow lets you accept the current state and fail only on net-new findings.</dd>
     <dt>What does it cost?</dt>
