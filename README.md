@@ -22,13 +22,13 @@ One command. One report. One exit code.
 
 ---
 
-**SecGate** orchestrates five industry-standard security scanners — **Semgrep, Gitleaks, osv-scanner, Trivy, and npm audit** — behind a single command. It normalizes their output into one report and fails the pipeline on CRITICAL or HIGH findings. No account. No telemetry. No data leaves your machine — except for the vulnerability lookups the wrapped scanners perform (see [Network access](#network-access)).
+**SecGate** orchestrates five established security scanners — **Semgrep, Gitleaks, osv-scanner, Trivy, and npm audit** — behind a single command. It normalizes the scanners available on your machine into one report and fails the pipeline on CRITICAL or HIGH findings by default. No SecGate account or telemetry. Some wrapped scanners fetch rules, advisories, databases, or image layers; see [Network access](#network-access).
 
-**Honest positioning.** SecGate is a **triage accelerator**, not a defect oracle. Dogfooded against a 2,628-file production codebase: **1,858 → 46 actionable findings — 98% noise demoted**. The wrapped scanners are each noisy in isolation (industry estimate: ~70% of raw SAST/SCA output is signal-less). SecGate's job is to surface what's actionable and demote the rest — see [What we demote (and why)](#what-we-demote-and-why).
+**Honest positioning.** SecGate is a **triage accelerator**, not a defect oracle. In one internal dogfood run over a 2,628-file codebase, its curated profile moved 1,812 of 1,858 findings to the informational view, leaving 46 inline for review. That is one workload, not a promised false-positive rate. Curated demotion changes presentation, never the underlying findings or gate policy; see [What we demote (and why)](#what-we-demote-and-why).
 
 **Status.** Early release (`v0.2.14`). Releases publish from GitHub Actions with npm trusted publishing and provenance. Report vulnerabilities via [SECURITY.md](SECURITY.md).
 
-**Accuracy contract.** SecGate's aggregation pipeline is deterministic — same inputs produce JSON-byte-identical findings, score, and gate status across every run. Two test suites lock the contract:
+**Accuracy contract.** SecGate's normalization and scoring pipeline is deterministic: the same raw scanner findings and configuration produce byte-identical normalized findings, score, and gate status. Scanner databases, downloaded rules, and registry responses can change independently between scans. Two test suites lock the local aggregation contract:
 
 - `test/determinism.mjs` — JSON byte-equality across reruns, order-stable dedup, override + ignore applied identically.
 - `test/golden-secgate.mjs` — hand-crafted 11-finding fixture; expected counts, score (`22`), and gate status are inline so any change surfaces in code review.
@@ -61,7 +61,7 @@ Penalty per finding: CRITICAL −25 · HIGH −10 · MEDIUM −3 · LOW −1 · 
 npx @stelnyx/secgate .
 ```
 
-Runs all five scanners against the current directory, writes a JSON report, a self-contained HTML report, and (optionally) SARIF. Exit `0` on clean, `1` on CRITICAL/HIGH findings. That's the whole product.
+Runs every enabled scanner found on your machine against the current directory, writes JSON and self-contained HTML reports, and optionally writes SARIF. Missing tools are reported as skipped. Exit `0` when the configured gate passes, `1` when it fails, and `2` for invalid input or CLI errors.
 
 ---
 
@@ -82,7 +82,7 @@ SecGate does not ship its own analysis engine. Every finding originates from one
 
 | Scanner       | Category                  | Notes                                                                 |
 |---------------|---------------------------|-----------------------------------------------------------------------|
-| **Semgrep**   | SAST (static code)        | OSS ruleset. 10+ languages. Extend via `customSemgrepRules`. Local.   |
+| **Semgrep**   | SAST (static code)        | Uses `--config=auto` by default, which can fetch registry rules. Override with `customSemgrepRules`. |
 | **Gitleaks**  | Secrets & credentials     | Working tree + git history (when `.git/` present). Secrets redacted. Local. |
 | **npm audit** | Node dependencies (SCA)   | Runs when `package.json` present. **Queries the npm registry advisory API (network).** |
 | **osv-scanner** | Polyglot SCA            | npm, PyPI, Go, Cargo, Maven, RubyGems, Packagist, NuGet, Pub. **Queries the OSV.dev API (network).** |
@@ -94,17 +94,17 @@ Missing scanner binaries are **skipped gracefully** and noted in the report. No 
 
 ## Network access
 
-SecGate itself makes **no network calls** — no telemetry, no account, no phone-home, and the report is written to local files. But three of the five wrapped scanners need the internet to do their job:
+SecGate's Node.js orchestration layer has **no telemetry or account phone-home**, and reports are written locally. The subprocesses it launches may use the network:
 
 | Scanner | Network use |
 |---------|-------------|
-| Semgrep | None — runs its ruleset against your files. |
+| Semgrep | The default `--config=auto` may fetch rules from the Semgrep Registry. A local `customSemgrepRules` path can avoid that fetch. |
 | Gitleaks | None — scans your working tree and git history locally. |
 | npm audit | Queries the npm registry's advisory API for your dependency tree. |
 | osv-scanner | Queries the OSV.dev API for advisories matching your dependency manifests. |
 | Trivy | Downloads/updates its vulnerability database; pulls image layers when scanning container images. |
 
-So "no telemetry" is exact; "fully air-gapped" is not — run SecGate offline and `npm audit`, `osv-scanner`, and `Trivy` will degrade or skip (which SecGate reports). On first run, `osv-scanner` and Trivy may download vulnerability databases; SecGate prints a one-line note before starting those scanners so the initial delay is not mistaken for a hang. A first-class offline mode (skip the network scanners, or point them at a local DB mirror) is tracked in the issue backlog.
+So "no SecGate telemetry" is exact; "fully air-gapped by default" is not. Offline behavior belongs to each scanner and may be clean, skipped, or errored depending on its cache and configuration; SecGate records tool status and skip reasons in the report. It prints a note before osv-scanner and Trivy because first-run data downloads can take time.
 
 ---
 
@@ -502,7 +502,7 @@ Each run writes:
 
 ```json
 {
-  "version": "0.2.13",
+  "version": "0.2.14",
   "timestamp": "ISO 8601",
   "target": "/absolute/path",
   "mode": "dry-run | apply",
@@ -639,15 +639,15 @@ SecGate is the open-source input layer for a broader security workflow. The **co
 
 ## Tiers (planned)
 
-> **Status:** today's CLI is MIT, single tier — `npx @stelnyx/secgate .` runs the full scan, no flags, no gates. The table below is the planned tier model that aligns SecGate with [LuxScope](https://github.com/Stelnyx/LuxScope) and [LuxFaber](https://github.com/Stelnyx/LuxFaber) — same engine at every tier, paid tiers add presentation, persistence, and governance. **`recon` ships today.** `standard` / `enterprise` arrive when the hosted-link service lands.
+> **Status:** today's shipped product is the MIT-licensed local CLI described above. It includes configuration, policy gates, baselines, suppressions, JSON/HTML/SARIF output, and both confidence profiles. The names below describe a product direction, not purchasable plans or committed delivery dates.
 
 | Tier | Scanners | Findings | HTML report | Hosted shareable link | Branded cover | Trend storage |
 |---|---|---|---|---|---|---|
-| **recon** | all 5 (Semgrep · Gitleaks · npm audit · osv-scanner · Trivy) | all (curated + strict profiles) | yes (self-contained) | no | no | no |
+| **Local CLI (available)** | all enabled and installed scanners | all (curated + strict profiles) | yes (self-contained) | no | no | no |
 | **standard** | all 5 | all | yes | yes (persistent URL) | no | yes (per-repo history) |
 | **enterprise** | all 5 + custom rule packs | all | yes | yes | yes (logo, client, accent color) | yes (org-wide rollup) |
 
-`recon` is full local analysis — same scanners, same findings, same SARIF output as paid tiers. Paid tier value is **persistence, sharing, and governance**, not analysis depth. The CLI does not gate any scanner output by tier — every CVE, every secret, every IaC misconfig surfaces in `recon`. The MIT core boundary is defined in [`OPEN-CORE.md`](OPEN-CORE.md).
+The local CLI does not gate scanner output by a commercial tier. Findings produced by enabled, installed scanners remain available locally, subject to explicit configuration, baselines, and suppressions. The intended open-core boundary is defined in [`OPEN-CORE.md`](OPEN-CORE.md).
 
 ---
 
